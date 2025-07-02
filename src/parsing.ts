@@ -1,428 +1,406 @@
-/**
- * Created by eddyspreeuwers on 1/5/20.
- */
-import { attribs, capFirst, findFirstChild, findNextSibbling, log, xml} from './xml-utils';
-import reverse = require("lodash/fp/reverse");
+import { attribs, capFirst, findChildren, log, xml } from "./xml-utils.js";
+import type { Node } from "@xmldom/xmldom";
+import { z } from "zod";
 
-const UNBOUNDED = 'unbounded';
-
+export const UNBOUNDED = "unbounded" as const;
 
 export type FindNextNode = (n: Node) => Node;
-export type AstNodeFactory = (n: Node) => ASTNode;
+export type AstNodeFactory = (n: Node) => ASTNode | null;
 export type AstNodeMerger = (r1: ASTNode, r2: ASTNode) => ASTNode;
 
-const returnMergedResult: AstNodeMerger  = (r1, r2) => r1.merge(r2);
+// Schema for field type validation
+const FieldTypeSchema = z.object({
+  type: z.string(),
+  namespace: z.string().optional(),
+});
 
-let ns = 'xs';
+export type FieldType = z.infer<typeof FieldTypeSchema>;
 
-
-export function setNamespace(namespace: string) {
-    ns = namespace;
-}
-export function astNode(s:string) {
-    return new ASTNode(s);
-}
-
-export const NEWLINE = '\n';
-
-export function astClass(n?: Node) {
-    let result = astNode('Class');
-    if (n) result.addName(n);
-    return result;
+export function astNode(s: string): ASTNode {
+  return new ASTNode(s);
 }
 
-export function astNamedUntypedElm(n:Node) {
-    return astNode('NamedUntypedElm').named(attribs(n).name);
+export const NEWLINE = "\n";
+
+export function astClass(n?: Node): ASTNode {
+  const result = astNode("Class");
+  if (n) result.addName(n);
+  return result;
 }
 
-export function astEnumValue(n: Node){
-    return astNode('EnumValue').prop('value', attribs(n).value);
-}
-export function astRestrictions(n: Node){
-    return astNode('Restrictions').prop(xml(n).localName, attribs(n).value);
+export function astNamedUntypedElm(n: Node): ASTNode {
+  const attrs = attribs(n);
+  return astNode("NamedUntypedElm").named(attrs?.name || "");
 }
 
-export function astLengthValue(n: Node){
-    return astNode('MaxLengthValue').prop('maxLength', attribs(n).value);
+export function astEnumValue(n: Node): ASTNode {
+  const attrs = attribs(n);
+  return astNode("Enumeration").addEnumValue(attrs?.value || "");
 }
 
-
-export function astField() {
-    return astNode('Field');
+export function astRestrictions(n: Node): ASTNode {
+  const attrs = attribs(n);
+  const localName = xml(n).localName;
+  return astNode("Restrictions").prop(localName, attrs?.value || "");
 }
 
-
-export function oneOf(...options: Parslet[]) {
-    return new OneOf('ONE OFF' , options);
+export function astField(): ASTNode {
+  return astNode("Field");
 }
 
+export interface Parslet {
+  parse(node: Node, indent?: string): ASTNode | null;
+}
 
-export function match(t: Terminal, m?: AstNodeMerger) {
-    return new Matcher('MATCH' , t, m);
+export function match(terminal: Terminal, merger?: AstNodeMerger): Matcher {
+  return new Matcher(terminal.label, terminal, merger);
 }
 
 export interface IParsable {
-    parse(node: Node, indent?: string): ASTNode;
+  parse(node: Node, indent?: string): ASTNode | null;
 }
 
-export type Attribs = {[key: string]: string} ;
+export interface Attribs {
+  [key: string]: string | ASTNode[] | string[] | EnumValue[];
+}
 
-
-export function getFieldType(type: string, defNs: string): string {
-
-    const key = type?.toLowerCase().split(':').reverse().shift();
-
-    const typeMap = {
-        string: "string",
-        float: "number",
-        double: "number",
-        int: "number",
-        integer: "number",
-        long: "number",
-        positiveinteger: "number",
-        nonnegativeinteger: "number",
-        decimal: "number",
-        datetime: "Date",
-        date: "Date",
-        base64binary: "string",
-        boolean: "boolean",
-    }
-
-    if (defNs && !/:/.test(type)){
-        type = defNs.toLowerCase() + '.' + capFirst(type);
-    } else {
-        type = type?.split(':').map( (p, i, a) => (i < a.length - 1) ? p.toLowerCase() : capFirst(p)).join('.');
-    }
-    if (type === 'Number') type = 'number';
-    return typeMap[key] || type || 'any';
+export interface EnumValue {
+  value: string;
 }
 
 export class ASTNode {
+  public nodeType: string;
+  public name: string = "";
+  private readonly _attr: Attribs = {};
+  public children: ASTNode[] = [];
+  public classes?: ASTNode[] = [];
 
-    public nodeType: string;
-    public name: string;
-    private _attr: Attribs;
-    public children: ASTNode[];
+  constructor(type: string) {
+    this.nodeType = type;
+    this._attr = {};
+  }
 
-    constructor(type: string){
-        this.nodeType = type;
-        this._attr = {};
+  public prop(key: string, value: unknown): this {
+    this._attr[key] = String(value);
+    return this;
+  }
+
+  public named(name: string): this {
+    this.name = name;
+    return this;
+  }
+
+  public prefixFieldName(prefix: string): this {
+    this.prop("fieldName", prefix + this._attr.fieldName);
+    return this;
+  }
+
+  public addName(node: Node, prefix = ""): this {
+    const attrs = attribs(node);
+    this.name = prefix + capFirst(attrs?.name || "");
+    return this;
+  }
+
+  public addField(node: Node, fldType?: string): this {
+    const attrs = attribs(node);
+    const type = fldType || getFieldType(attrs?.type || "", null);
+    const isOptional = attrs?.minOccurs === "0";
+    const isArray = attrs?.maxOccurs === UNBOUNDED;
+
+    this.prop("fieldName", `${attrs?.name || ""}${isOptional ? "?" : ""}`).prop(
+      "fieldType",
+      `${type}${isArray ? "[]" : ""}`
+    );
+
+    this.addAttribs(node);
+    return this;
+  }
+
+  get attr(): Readonly<Attribs> {
+    return this._attr;
+  }
+
+  public addAttribs(n: Node): this {
+    if (n.nodeType !== n.ELEMENT_NODE) return this;
+    const attrs = attribs(n);
+    if (!attrs) return this;
+    for (const [key, value] of Object.entries(attrs)) {
+      if (!value) continue;
+
+      switch (key) {
+        case "name":
+          this.name = String(value);
+          break;
+        case "maxOccurs":
+          this._attr.array = String(value === UNBOUNDED);
+          break;
+        case "minOccurs":
+          this._attr.optional = String(value === "0");
+          break;
+        default:
+          this._attr[key] = String(value);
+      }
     }
+    return this;
+  }
 
-    public prop(key: string, value: any) {
-        this._attr[key] = value;
-        return this;
+  public addEnumValue(value: string): this {
+    if (!this._attr.values) {
+      this._attr.values = [] as EnumValue[];
     }
-
-    public named(name:string): ASTNode {
-        this.name = name;
-        return this;
+    if (Array.isArray(this._attr.values)) {
+      (this._attr.values as EnumValue[]).push({ value });
     }
+    return this;
+  }
 
-    public prefixFieldName(prefix: string): ASTNode{
-        this.prop('fieldName',  '$' + this._attr.fieldName);
-        return this;
-    }
+  public merge(other: ASTNode): ASTNode {
+    const result = new ASTNode(this.nodeType);
+    Object.assign(result, this);
+    Object.assign(result, other);
 
-    public addName(node: Node, prefix?: string): ASTNode{
-        this.name = (prefix || '') + capFirst( attribs(node).name);
-        return this;
-    }
-
-    public addField(node: Node, fldType?: string) {
-
-        let type = fldType || getFieldType(attribs(node).type, null);
-
-        this.prop('fieldName', attribs(node).name + ((attribs(node).minOccurs === '0') ? '?' : ''))
-            .prop('fieldType', type + ((attribs(node).maxOccurs === UNBOUNDED) ? '[]' : ''));
-        this.addAttribs(node);
-        return this;
-    }
-
-
-    get attr():any {
-        return this._attr;
-    }
-
-    public addAttribs(n: Node) {
-        for (let i = 0; i < (n as HTMLElement).attributes.length ; i++){
-            let attr = (n as HTMLElement).attributes.item(i);
-            if (attr.name === 'name') {
-               this.name = attr.value;
-            } else if (attr.name === 'maxOccurs') {
-                this.attr.array =attr.value === 'unbounded';
-            } else if (attr.name === 'minOccurs') {
-                this.attr.optional = attr.value === '0';
-            } else {
-                this.attr[attr.name] = attr.value;
-            }
-        }
-        return this;
-    }
-
-    public merge (other: ASTNode){
-        let result = new ASTNode(this.nodeType);
-        result =  (Object as any).assign(result, this);
-        result =  (Object as any).assign(result, other);
-        (Object as any).assign(result.attr, this.attr);
-        (Object as any).assign(result.attr, other.attr);
-        result.nodeType = this.nodeType;
-        return result;
-    }
-
-}
-
-export class ASTClass extends ASTNode {
-
-
-    constructor(n: Node) {
-        super ("Class");
-        this.addName(n);
-    }
-
-    get nodeType(){
-        return 'Class;';
-    }
-
-}
-
-export abstract class Parslet implements IParsable {
-    public name: string;
-    public label: string;
-    public fnNextNode: FindNextNode;
-    public nextParslet: Parslet;
-
-    constructor(name: string) {
-        this.name = name;
-        this.fnNextNode = (x) => x;
-    }
-
-    public abstract parse(node: Node, indent?: string): ASTNode;
-
-    // Add child at and of child chain recursively
-    public addNext(p: Parslet, fnn: FindNextNode) {
-        if (this.nextParslet) {
-            this.nextParslet.addNext(p, fnn);
+    // Special handling for array attributes
+    for (const [key, value] of Object.entries(this._attr)) {
+      if (Array.isArray(value)) {
+        if (value[0] instanceof ASTNode) {
+          result._attr[key] = value as ASTNode[];
+        } else if (typeof value[0] === "string") {
+          result._attr[key] = value as string[];
         } else {
-            this.nextParslet = p;
-            this.fnNextNode = fnn;
+          result._attr[key] = value as EnumValue[];
         }
-        return this;
+      } else {
+        result._attr[key] = value;
+      }
     }
 
-    public children(...options: Parslet[]) {
-        const next = new Sibblings(this.name, options);
-        this.addNext(next, findFirstChild);
-        return this;
-    }
-
-
-    public child(t: Terminal, m?: AstNodeMerger) {
-        const next = new Matcher('MATCH' , t, m);
-        this.addNext(next, findFirstChild);
-        return this;
-    }
-
-
-    public match(t: Terminal, m?: AstNodeMerger) {
-        const next = new Matcher('MATCH' , t, m);
-        this.addNext(next, n => n);
-        return this;
-    }
-
-    // public oneOf(...options: Parslet[]){
-    //     const next = new OneOf('ONE OFF' , options);
-    //     this.addNext(next, (n) => n);
-    //     return this;
-    // }
-
-    public childIsOneOf(...options: Parslet[]) {
-        const next = new OneOf('ONE OFF' , options);
-        this.addNext(next, findFirstChild);
-        return this;
-    }
-
-    public empty(){
-        const next = new Empty('');
-        this.addNext(next, findFirstChild);
-        return this;
-    }
-    public labeled(s:string){
-        this.label = s;
-        return this;
-    }
-
-
-}
-
-export  class Empty extends  Parslet {
-    public parse(node: Node, indent?: string): ASTNode {
-        log(indent + 'Empty:, node: ', node?.nodeName);
-        return (node) ? null : new ASTNode('Empty');
-    }
-}
-
-export class Terminal implements IParsable {
-    public name:string;
-    public tagName: string;
-
-    private astNodeFactory = (n) => new ASTNode(this.tagName);
-
-    constructor(name: string, handler?: AstNodeFactory) {
-        this.name = name;
-        this.tagName = name.split(':').shift();
-
-        this.astNodeFactory = handler || this.astNodeFactory;
-    }
-
-
-    public parse(node: Node, indent?: string): ASTNode {
-        let result = null;
-        const isElement = xml(node)?.localName === this.tagName;
-        log(indent + 'Terminal: ', this.name +  ', node: ', node?.nodeName, 'found: ', isElement);
-        if (isElement) {
-            result =  this.astNodeFactory(node);
+    // Merge other's attributes
+    for (const [key, value] of Object.entries(other._attr)) {
+      if (Array.isArray(value)) {
+        if (!result._attr[key]) {
+          result._attr[key] = [];
         }
-        return result;
+        const target = result._attr[key] as any[];
+        result._attr[key] = [...target, ...value];
+      } else {
+        result._attr[key] = value;
+      }
     }
 
-
+    result.nodeType = this.nodeType;
+    return result;
+  }
 }
 
-export class Proxy extends Parslet {
+export class Terminal implements Parslet {
+  private readonly name: string;
+  private readonly factory?: AstNodeFactory;
+  readonly label: string;
 
-    public parsable: Parslet;
+  constructor(name: string, factory?: AstNodeFactory) {
+    const [baseName = "", label = ""] = name.split(":");
+    this.name = baseName;
+    this.label = label;
+    this.factory = factory;
+  }
 
-    constructor(name: string) {
-        super(name);
+  public parse(node: Node, indent = ""): ASTNode | null {
+    if (!node || node.nodeType !== node.ELEMENT_NODE) return null;
 
+    log(`${indent}Parsing terminal ${this.name}`);
+
+    const localName = xml(node).localName;
+    if (localName !== this.name) return null;
+
+    if (this.factory) {
+      const result = this.factory(node);
+      if (result && this.label) {
+        result.prop("label", this.label);
+      }
+      return result;
     }
-    set parslet(p: Parslet) {
-        this.parsable = p;
-    }
 
-    public parse(node: Node, indent?: string): ASTNode {
-        return this.parsable.parse(node, indent + ' ');
-    }
+    return astNode(this.name).addAttribs(node);
+  }
 }
 
+export class OneOf implements Parslet {
+  private readonly name: string;
+  private readonly options: Parslet[];
+  private _label?: string;
 
+  constructor(name: string, options: Parslet[]) {
+    this.name = name;
+    this.options = options;
+  }
 
-export class Matcher extends Parslet {
-    private terminal: Terminal;
-    private merger: AstNodeMerger = returnMergedResult;
+  public setLabel(label: string): this {
+    this._label = label;
+    return this;
+  }
 
+  public parse(node: Node, indent = ""): ASTNode | null {
+    log(`${indent}Parsing OneOf ${this.name}`);
 
-    constructor(name: string, t: Terminal, m?: AstNodeMerger) {
-        super(name);
-        this.merger = m || this.merger;
-        this.terminal = t;
-
-    }
-
-    public parse(node: Node, indent?: string): ASTNode {
-        let sibbling = node;
-        let result: ASTNode;
-
-        // find the first sibbling matching the terminal
-        while (sibbling){
-            // log(indent, 'skip?',xml(node)?.localName );
-            const skip = /(annotation|documentation)/.test(xml(sibbling)?.localName);
-            if (!skip) break;
-            sibbling = findNextSibbling(sibbling);
-        }
-        result  = this.terminal.parse(sibbling, indent + ' ');
-
-        log(indent, this.name, this.terminal.tagName, 'node: ', sibbling?.nodeName, 'match:', JSON.stringify(result));
-        log(indent, this.name, 'next: ', this.nextParslet?.name, this.nextParslet?.label || '');
-        if (result && this.nextParslet) {
-            const nextResult =  this.nextParslet.parse(this.fnNextNode(sibbling), indent + ' ');
-            if (nextResult) {
-                result = this.merger(result, nextResult);
-            } else {
-                log(indent,'no next result' ,this.name);
-                result = null;
-            }
-        }
-        log(indent, this.name, 'result: ', JSON.stringify(result));
-        return result;
-    }
-
-
-}
-
-export class OneOf extends Parslet {
-
-    public options: Parslet[];
-
-    constructor(name: string, options: Parslet[]) {
-        super(name);
-        this.options = options;
-    }
-
-    public parse(node: Node, indent?: string): ASTNode {
-        const nextNode = this.fnNextNode(node);
-        log(indent + 'ONE OFF:', this.options.map(o => o.label).join(','), node?.nodeName, nextNode?.nodeName);
-        let result = null;
-        let count = 1;
-        for (const option of this.options || []) {
-            log(indent + ' try:', option.name , '#' , count++, option.label || '');
-            result = option.parse(nextNode, indent + '  ');
-            if (result) {
-                break;
-            }
+    for (const option of this.options) {
+      const result = option.parse(node, indent + "  ");
+      if (result) {
+        log(`${indent}Found matching option in ${this.name}`);
+        if (this._label) {
+          result.prop("label", this._label);
         }
         return result;
+      }
     }
+
+    log(`${indent}No matching options found in ${this.name}`);
+    return null;
+  }
 }
 
-export class Sibblings extends Parslet {
+export class Matcher implements Parslet {
+  private readonly name: string;
+  private readonly terminal: Terminal;
+  private readonly defaultMerger?: AstNodeMerger;
+  private readonly _children: Array<{
+    parslet: Parslet;
+    merger?: AstNodeMerger;
+  }> = [];
+  private _label?: string;
+  private handler?: (n: Node) => ASTNode | null;
 
-    //public parsable: Parslet;
-    public options: Parslet[];
+  constructor(name: string, terminal: Terminal, defaultMerger?: AstNodeMerger) {
+    this.name = name;
+    this.terminal = terminal;
+    this.defaultMerger = defaultMerger;
+  }
 
-    constructor(name: string, options: Parslet[]) {
-        super(name);
-        this.options = options;
+  public labeled(label: string): this {
+    this._label = label;
+    return this;
+  }
+
+  public addChild(parslet: Parslet, merger?: AstNodeMerger): this {
+    this._children.push({ parslet, merger });
+    return this;
+  }
+
+  public addChildren(parslets: Parslet[] | Parslet): this {
+    if (Array.isArray(parslets)) {
+      this._children.push(...parslets.map((p) => ({ parslet: p })));
+    } else {
+      this._children.push({ parslet: parslets });
+    }
+    return this;
+  }
+
+  public empty(): this {
+    return this;
+  }
+
+  public parse(node: Node, indent = ""): ASTNode | null {
+    if (this.handler) {
+      return this.handler(node);
     }
 
-    public parse(node: Node, indent?: string): ASTNode{
+    const result = this.terminal.parse(node, indent);
+    if (!result) return null;
 
-        log(indent + 'Collect all :', this.options.map(x => x.name).join(','), node?.nodeName);
-        let sibbling = node;
+    if (this._label) {
+      result.prop("label", this._label);
+    }
 
-        const result = new ASTNode("Sibblings");
-        result.children = [];
+    if (!this._children.length) return result;
 
-        while (sibbling) {
-            log(indent + 'list sibbling:', sibbling?.nodeName);
+    log(`Parsing matcher ${this.name} with ${this._children.length} children`);
 
-            const skip = /(annotation|documentation)/.test(xml(sibbling)?.localName);
-            if (!skip) {
-
-                //const listItem = this.parsable.parse(sibbling, indent + '  ');
-                let listItem = null;
-                let count = 0;
-                for (let option of this.options || []) {
-                    log(indent + ' try:', option.name, '#', count++, option.label || '');
-                    listItem = option.parse(sibbling, indent + '  ');
-                    if (listItem) {
-                        break;
-                    }
-                }
-
-                if (listItem) {
-                    result.children.push(listItem);
-                }
-            }
-            sibbling = findNextSibbling(sibbling);
-
+    const children = findChildren(node);
+    for (const child of children) {
+      for (const { parslet, merger } of this._children) {
+        const childResult = parslet.parse(child, indent + "  ");
+        if (childResult) {
+          log(`Found matching child for ${this.name}:`, childResult.nodeType);
+          if (merger) {
+            Object.assign(result, merger(result, childResult));
+          } else if (this.defaultMerger) {
+            Object.assign(result, this.defaultMerger(result, childResult));
+          } else if (!result.children) {
+            result.children = [childResult];
+          } else {
+            result.children.push(childResult);
+          }
+          break;
         }
-        return result;
+      }
     }
+
+    return result;
+  }
+
+  setHandler(handler: (n: Node) => ASTNode | null): Matcher {
+    this.handler = handler;
+    return this;
+  }
 }
 
+export class Proxy implements IParsable {
+  public parslet?: IParsable;
 
+  parse(node: Node, indent = ""): ASTNode | null {
+    if (!this.parslet) {
+      throw new Error("Proxy parslet not initialized");
+    }
+    return this.parslet.parse(node, indent);
+  }
+}
 
+export function getFieldType(type: string, defNs: string | null): string {
+  if (!type) return "any";
 
+  const typeData = { type, namespace: defNs };
+  const validatedType = FieldTypeSchema.parse(typeData);
+  const validatedTypeStr = validatedType.type || "";
 
+  const parts = validatedTypeStr.toLowerCase().split(":");
+  const key = parts[parts.length - 1] || "";
+
+  const typeMap: Record<string, string> = {
+    string: "string",
+    float: "number",
+    double: "number",
+    int: "number",
+    integer: "number",
+    long: "number",
+    positiveinteger: "number",
+    nonnegativeinteger: "number",
+    decimal: "number",
+    datetime: "Date",
+    date: "Date",
+    base64binary: "string",
+    boolean: "boolean",
+  };
+
+  let resultType = type;
+  if (validatedType.namespace && !/:/.test(resultType)) {
+    resultType = `${validatedType.namespace.toLowerCase()}.${capFirst(resultType)}`;
+  } else {
+    resultType = resultType
+      .split(":")
+      .map((p, i, a) => (i < a.length - 1 ? p.toLowerCase() : capFirst(p)))
+      .join(".");
+  }
+
+  if (resultType === "Number") resultType = "number";
+  const mappedType = key in typeMap ? typeMap[key] : resultType;
+  return mappedType || "any";
+}
+
+export function oneOf(options: Parslet[]): OneOf {
+  return new OneOf("OneOf", options);
+}
+
+export function hasAttribute(node: Node, attr: string): boolean {
+  const attrs = attribs(node);
+  if (!attrs) return false;
+  return attr in attrs && attrs[attr as keyof typeof attrs] !== undefined;
+}

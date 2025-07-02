@@ -1,29 +1,43 @@
-/// <reference types="lodash" />
-/**
- * Created by Eddy Spreeuwers at 11 march 2018
- */
-import { FileDefinition } from "ts-code-generator";
-export declare class ClassGenerator {
-    private classPrefix;
-    types: string[];
-    schemaName: string;
-    xmlnsName: string;
-    private fileDef;
-    private verbose;
-    private pluralPostFix;
-    private dependencies;
-    private importMap;
-    private targetNamespace;
-    constructor(depMap?: Map<string, string>, classPrefix?: string);
-    generateClassFileDefinition(xsd: string, pluralPostFix?: string, verbose?: boolean): FileDefinition;
-    private findAttrValue;
-    private nodeName;
-    private findChildren;
-    private findFirstChild;
-    private parseXsd;
-    private log;
-    private makeSortedFileDefinition;
-    private makeConstructor;
-    private addProtectedPropToClass;
-    private findHierachyDepth;
+import type { SourceFile, Project } from "ts-morph";
+import type { Node } from "@xmldom/xmldom";
+import type { z } from "zod";
+
+export interface ClassGeneratorOptions {
+  /** Map of namespace to module path dependencies */
+  depMap?: Map<string, string>;
+  /** Prefix to add to generated class names */
+  classPrefix?: string;
+  /** Enable verbose logging */
+  verbose?: boolean;
+  /** Postfix to add to plural field names */
+  pluralPostFix?: string;
+  /** Project configuration */
+  project?: Project;
+}
+
+export class ClassGenerator {
+  /** List of generated types */
+  readonly types: Set<string>;
+
+  /** Name of the schema being processed */
+  readonly schemaName: string;
+
+  /** Name of the XML namespace */
+  readonly xmlnsName: string;
+
+  constructor(options?: ClassGeneratorOptions);
+
+  /**
+   * Generates TypeScript classes from an XSD schema
+   * @param xsd - The XSD schema string
+   * @param pluralPostFix - Optional postfix for plural field names
+   * @param verbose - Enable verbose logging
+   * @returns SourceFile containing generated classes
+   * @throws {XSDParseError} When XSD parsing fails
+   */
+  generateClassFile(
+    xsd: string,
+    pluralPostFix?: string,
+    verbose?: boolean
+  ): SourceFile;
 }

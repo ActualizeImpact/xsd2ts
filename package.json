@@ -1,40 +1,67 @@
 {
-  "name": "xsd2ts",
-  "version": "0.9.17",
-  "description": "generates template classes for an xsd",
-  "main": "index.js",
+  "name": "actualizeimpact-xsd2ts-modern",
+  "version": "1.0.0",
+  "description": "Modern TypeScript class generator from XSD schemas (forked from xsd2ts)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "packageManager": "pnpm@10.4.0",
+  "private": true,
+  "engines": {
+    "node": "22.14.0",
+    "pnpm": ">=10.4.0"
+  },
   "scripts": {
-    "test:jasmine": "ts-node  -r ./test/node-unittest-setup.js node_modules/jasmine/bin/jasmine.js JASMINE_CONFIG_PATH=jasmine.json",
-    "test:j-debug": "ts-node $NODE_DEBUG_OPTION  ./test/node-unittest-setup.js node_modules/jasmine/bin/jasmine.js JASMINE_CONFIG_PATH=jasmine.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "compile": "tsc -p ./src",
     "compile-gen": "tsc -p ./src/generated --outDir ./compiled",
-    "version": "npm version patch",
-    "setup": "npm install",
-    "deploy": "npm run compile && npm publish"
+    "build": "pnpm run compile",
+    "prepare": "pnpm run build",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,json}\""
   },
-  "author": "Eddy Spreeuwers",
-  "license": "UNLICENSED",
-  "repository": "https://github.com/spreeuwers/xsd2ts.git",
+  "author": "Charles McDonald",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ActualizeImpact/xsd2ts"
+  },
   "dependencies": {
-    "@types/lodash.clonedeep": "4.5.3",
-    "@types/lodash.merge": "4.6.3",
-    "@types/node": "8.0.7",
-    "@types/xml-parser": "^1.2.29",
-    "file-loader": "0.11.2",
-    "fs-extra": "3.0.1",
-    "npm-test": "0.0.1",
-    "ts-code-generator": "0.0.3",
-    "ts-loader": "2.2.2",
-    "ts-node": "^8.6.2",
-    "typescript": "^3.9.9",
-    "xmldom-reborn": "^1.0.5"
+    "@xmldom/xmldom": "0.9.7",
+    "fast-xml-parser": "5.0.1",
+    "graceful-fs": "4.2.11",
+    "p-limit": "6.2.0",
+    "ts-morph": "25.0.1",
+    "zod": "3.24.2"
   },
   "devDependencies": {
-    "@types/jasmine": "^2.8.16",
-    "istanbul": "1.1.0-alpha.1",
-    "jasmine": "^3.5.0",
-    "jasmine-core": "2.6.2",
-    "jasmine-ts": "0.2.0",
-    "tslint": "^5.20.1"
-  }
+    "@types/graceful-fs": "4.1.9",
+    "@types/node": "22.13.1",
+    "@typescript-eslint/eslint-plugin": "8.24.0",
+    "@typescript-eslint/parser": "8.24.0",
+    "@vitest/coverage-v8": "3.0.6",
+    "eslint": "9.20.1",
+    "eslint-config-prettier": "10.0.1",
+    "eslint-plugin-prettier": "5.2.3",
+    "lint-staged": "15.4.3",
+    "prettier": "3.5.1",
+    "rimraf": "6.0.1",
+    "tsx": "4.19.3",
+    "typescript": "5.7.3",
+    "vitest": "3.0.6"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  },
+  "types": "./dist/index.d.ts"
 }

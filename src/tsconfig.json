@@ -1,17 +1,31 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
-    "target": "es5",
+    "module": "ESNext",
+    "target": "ESNext",
     "declaration": true,
-    "declarationDir": "../",
-    "outDir":  "../"
+    "declarationDir": "./dist",
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": ["node"]
   },
   "exclude": [
-    "../node_modules",
-    "./generated"
-
+    "node_modules",
+    "dist",
+    "src/generated"
   ],
+  "include": [
+    "./**/*.ts"
+, "../test/types/types.ts"  ],
   "lib": [
-    "es2018"
+    "ESNext",
+    "DOM"
   ]
 }
